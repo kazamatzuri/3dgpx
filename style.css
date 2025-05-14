@@ -1,0 +1,62 @@
+body {
+    font-family: sans-serif;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background-color: #f0f0f0;
+}
+
+#controls {
+    padding: 15px;
+    background-color: #fff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    z-index: 10;
+}
+
+#controls div {
+    margin-bottom: 10px;
+}
+
+#controls label {
+    display: inline-block;
+    width: 200px;
+    margin-right: 10px;
+}
+
+#controls input[type="text"],
+#controls input[type="number"],
+#controls input[type="file"] {
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+
+#controls button {
+    padding: 8px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+#controls button:hover {
+    background-color: #0056b3;
+}
+
+#status {
+    margin-top: 10px;
+    font-style: italic;
+    color: #555;
+}
+
+#viewer {
+    flex-grow: 1; /* Takes remaining height */
+    position: relative; /* Needed if you want to overlay things */
+    background-color: #e0e0e0; /* Fallback if canvas doesn't fill */
+}
+
+canvas { /* Three.js canvas */
+    display: block; /* Removes bottom space */
+}

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPX 3D Visualizer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="controls">
+        <h1>GPX 3D Visualizer</h1>
+        <div>
+            <label for="mapboxToken">Mapbox Access Token:</label>
+            <input type="text" id="mapboxToken" placeholder="pk.your_mapbox_token" size="50">
+        </div>
+        <div>
+            <label for="gpxFile">Upload GPX File:</label>
+            <input type="file" id="gpxFile" accept=".gpx">
+        </div>
+        <div>
+            <label for="zScale">Vertical Scale (Z-axis):</label>
+            <input type="number" id="zScale" value="1.5" min="0.1" max="10" step="0.1">
+        </div>
+        <div>
+            <label for="terrainZoom">Terrain Detail (Zoom Level 10-14):</label>
+            <input type="number" id="terrainZoom" value="12" min="10" max="14" step="1">
+        </div>
+        <button id="visualizeButton">Visualize Track</button>
+        <div id="status"></div>
+    </div>
+
+    <div id="viewer"></div>
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Simple GPX Parser (or use a more robust one) -->
+    <script>
+        // Basic GPX Parser (can be replaced with a library like gpx.js or togeojson)
+        function parseGPX(gpxString) {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(gpxString, "text/xml");
+            const points = [];
+            const trkpts = xmlDoc.getElementsByTagName("trkpt");
+            for (let i = 0; i < trkpts.length; i++) {
+                const lat = parseFloat(trkpts[i].getAttribute("lat"));
+                const lon = parseFloat(trkpts[i].getAttribute("lon"));
+                const eleEl = trkpts[i].getElementsByTagName("ele")[0];
+                const ele = eleEl ? parseFloat(eleEl.textContent) : 0; // Elevation from GPX (optional)
+                points.push({ lat, lon, ele });
+            }
+            if (points.length === 0) { // try rtept if trkpt not found
+                const rtepts = xmlDoc.getElementsByTagName("rtept");
+                 for (let i = 0; i < rtepts.length; i++) {
+                    const lat = parseFloat(rtepts[i].getAttribute("lat"));
+                    const lon = parseFloat(rtepts[i].getAttribute("lon"));
+                    const eleEl = rtepts[i].getElementsByTagName("ele")[0];
+                    const ele = eleEl ? parseFloat(eleEl.textContent) : 0;
+                    points.push({ lat, lon, ele });
+                }
+            }
+            return points;
+        }
+    </script>
+    <script src="script.js"></script>
+</body>
+</html>
