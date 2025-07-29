@@ -19,11 +19,21 @@
         </div>
         <div>
             <label for="zScale">Vertical Scale (Z-axis):</label>
-            <input type="number" id="zScale" value="1.5" min="0.1" max="10" step="0.1">
+            <input type="number" id="zScale" value="0.1" min="0.1" max="10" step="0.1">
         </div>
         <div>
             <label for="terrainZoom">Terrain Detail (Zoom Level 10-14):</label>
             <input type="number" id="terrainZoom" value="12" min="10" max="14" step="1">
+        </div>
+        <div>
+            <label for="ambientLight">Ambient Light:</label>
+            <input type="range" id="ambientLight" value="0.55" min="0.1" max="1.0" step="0.05">
+            <span id="ambientLightValue">0.55</span>
+        </div>
+        <div>
+            <label for="directionalLight">Directional Light:</label>
+            <input type="range" id="directionalLight" value="0.5" min="0.1" max="1.0" step="0.05">
+            <span id="directionalLightValue">0.5</span>
         </div>
         <button id="visualizeButton">Visualize Track</button>
         <div id="status"></div>

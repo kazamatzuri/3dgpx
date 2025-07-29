@@ -1,15 +1,29 @@
 // --- Global Three.js Variables ---
 let scene, camera, renderer, controls, terrainMesh, trackLine;
+let ambientLight, directionalLight; // Store light references for dynamic updates
 const TERRAIN_SIZE = 1000; // Arbitrary size for our 3D terrain plane
+let cityMarkers = []; // To store references to city marker objects for easy removal
 
 // --- DOM Elements ---
 const mapboxTokenInput = document.getElementById('mapboxToken');
 const gpxFileInput = document.getElementById('gpxFile');
 const zScaleInput = document.getElementById('zScale');
 const terrainZoomInput = document.getElementById('terrainZoom');
+const ambientLightInput = document.getElementById('ambientLight');
+const directionalLightInput = document.getElementById('directionalLight');
+const ambientLightValueSpan = document.getElementById('ambientLightValue');
+const directionalLightValueSpan = document.getElementById('directionalLightValue');
 const visualizeButton = document.getElementById('visualizeButton');
 const statusDiv = document.getElementById('status');
 const viewerDiv = document.getElementById('viewer');
+
+// --- Sample City Data ---
+const cities = [
+    { name: "Zurich", lat: 47.3769, lon: 8.5417 },
+    { name: "Geneva", lat: 46.2044, lon: 6.1432 },
+    { name: "Bern", lat: 46.9480, lon: 7.4474 },
+    // Add more cities as needed
+];
 
 // --- Initialization ---
 function initThreeJS() {
@@ -29,9 +43,9 @@ function initThreeJS() {
     viewerDiv.appendChild(renderer.domElement);
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    ambientLight = new THREE.AmbientLight(0xffffff, parseFloat(ambientLightInput.value));
     scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight = new THREE.DirectionalLight(0xffffff, parseFloat(directionalLightInput.value));
     directionalLight.position.set(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SIZE);
     scene.add(directionalLight);
 
@@ -53,6 +67,67 @@ function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
+}
+
+// --- Utility function to create text sprites ---
+function makeTextSprite(message, parameters) {
+    const fontface = parameters.hasOwnProperty("fontface") ? parameters.fontface : "Arial";
+    const fontsize = parameters.hasOwnProperty("fontsize") ? parameters.fontsize : 18;
+    const borderThickness = parameters.hasOwnProperty("borderThickness") ? parameters.borderThickness : 2;
+    const borderColor = parameters.hasOwnProperty("borderColor") ? parameters.borderColor : { r:0, g:0, b:0, a:1.0 };
+    const backgroundColor = parameters.hasOwnProperty("backgroundColor") ? parameters.backgroundColor : { r:255, g:255, b:255, a:0.8 };
+    const textColor = parameters.hasOwnProperty("textColor") ? parameters.textColor : { r:0, g:0, b:0, a:1.0 };
+
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    // Estimate text width for canvas sizing
+    context.font = "Bold " + fontsize + "px " + fontface;
+    const metrics = context.measureText(message);
+    const textWidth = metrics.width;
+
+    canvas.width = textWidth + borderThickness * 2 + 10; // Add some padding
+    canvas.height = fontsize * 1.4 + borderThickness * 2; // 1.4 for line height
+
+    // Re-apply font after canvas resize
+    context.font = "Bold " + fontsize + "px " + fontface;
+    
+    // Background
+    context.fillStyle   = "rgba(" + backgroundColor.r + "," + backgroundColor.g + "," + backgroundColor.b + "," + backgroundColor.a + ")";
+    // Border
+    context.strokeStyle = "rgba(" + borderColor.r + "," + borderColor.g + "," + borderColor.b + "," + borderColor.a + ")";
+    context.lineWidth = borderThickness;
+    
+    // Rounded rectangle
+    function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x+r, y);
+        ctx.lineTo(x+w-r, y);
+        ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+        ctx.lineTo(x+w, y+h-r);
+        ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+        ctx.lineTo(x+r, y+h);
+        ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+        ctx.lineTo(x, y+r);
+        ctx.quadraticCurveTo(x, y, x+r, y);
+        ctx.closePath();
+        ctx.fill();
+        if (borderThickness > 0) ctx.stroke();
+    }
+    roundRect(context, borderThickness/2, borderThickness/2, canvas.width - borderThickness, canvas.height - borderThickness, 5);
+    
+    // Text
+    context.fillStyle = "rgba("+textColor.r+","+textColor.g+","+textColor.b+","+textColor.a+")";
+    context.fillText(message, borderThickness + 5, fontsize + borderThickness); // Adjust y position for padding
+
+    const texture = new THREE.Texture(canvas);
+    texture.needsUpdate = true;
+
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    // Scale sprite appropriately
+    sprite.scale.set(canvas.width/3, canvas.height/3, 1.0); // Adjust scale as needed
+    return sprite;  
 }
 
 // --- GPX and Terrain Logic ---
@@ -115,6 +190,45 @@ function getElevationFromImageData(imageData, u, v) { // u,v are 0-1 normalized 
     ctx.drawImage(imageData, 0, 0);
     const pixel = ctx.getImageData(x, y, 1, 1).data;
     return decodeTerrainRGB(pixel[0], pixel[1], pixel[2]);
+}
+
+async function fetchMapImageTile(tileX, tileY, zoom, token) {
+    // Example for Mapbox Streets. Replace with your preferred tile provider if needed.
+    const url = `https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/256/${zoom}/${tileX}/${tileY}?access_token=${token}`;
+    // const url = `https://a.tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`; // OpenStreetMap Example (no token needed)
+    statusDiv.textContent = `Fetching map image tile ${tileX},${tileY} (zoom ${zoom})...`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Failed to fetch map image tile ${tileX},${tileY}: ${response.statusText}`);
+        const blob = await response.blob();
+        return createImageBitmap(blob);
+    } catch (error) {
+        console.error("Error fetching map image tile:", error);
+        statusDiv.textContent = `Error fetching map image tile: ${error.message}`;
+        throw error; // Or handle more gracefully, e.g., return a placeholder
+    }
+}
+
+// Helper function to get elevation at a specific Lat, Lon using the fetched terrain-rgb tiles
+function getElevationAtLatLon(lat, lon, fetchedTerrainRGBTileData, terrainGeoBounds, zScale) {
+    let elevation = 0;
+    let foundTileForCoord = false;
+
+    for (const data of fetchedTerrainRGBTileData) { // data is {tileInfo, img}
+        const tileBbox = tileToBoundingBox(data.tileInfo.x, data.tileInfo.y, data.tileInfo.z);
+
+        if (lat <= tileBbox.north && lat >= tileBbox.south && lon >= tileBbox.west && lon <= tileBbox.east) {
+            const u_tile = (lon - tileBbox.west) / (tileBbox.east - tileBbox.west);
+            const v_tile = (tileBbox.north - lat) / (tileBbox.north - tileBbox.south); // v is 0 at North, 1 at South
+            elevation = getElevationFromImageData(data.img, u_tile, v_tile);
+            foundTileForCoord = true;
+            break;
+        }
+    }
+    // if (!foundTileForCoord) {
+    //     console.warn(`Coordinate ${lat.toFixed(5)},${lon.toFixed(5)} outside fetched terrain-rgb tile coverage. Using 0 elevation.`);
+    // }
+    return elevation * zScale;
 }
 
 async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
@@ -223,18 +337,32 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
         fetchTerrainTile(tile.x, tile.y, tile.z, mapboxToken)
             .then(imgBitmap => ({ tileInfo: tile, img: imgBitmap })) // Keep tile info with image
             .catch(error => {
-                console.warn(`Failed to fetch tile ${tile.x},${tile.y}. Error: ${error}. Skipping.`);
+                console.warn(`Failed to fetch terrain-rgb tile ${tile.x},${tile.y}. Error: ${error}. Skipping.`);
                 return null; // Allow Promise.all to succeed even if some tiles fail
             })
     );
 
-    const fetchedTileData = (await Promise.all(tileImagePromises)).filter(Boolean); // Filter out nulls from failed fetches
+    const mapImagePromises = tilesToFetch.map(tile =>
+        fetchMapImageTile(tile.x, tile.y, tile.z, mapboxToken) // Using same zoom and token for map images
+            .then(imgBitmap => ({ tileInfo: tile, img: imgBitmap }))
+            .catch(error => {
+                console.warn(`Failed to fetch map image tile ${tile.x},${tile.y}. Error: ${error}. Skipping.`);
+                return null; 
+            })
+    );
 
-    if (fetchedTileData.length === 0) {
-        statusDiv.textContent = "No terrain tiles successfully fetched. Cannot create terrain.";
+    const fetchedTerrainRGBTileData = (await Promise.all(tileImagePromises)).filter(Boolean); // Filter out nulls from failed fetches
+    const fetchedMapImageTileData = (await Promise.all(mapImagePromises)).filter(Boolean);
+
+    if (fetchedTerrainRGBTileData.length === 0) {
+        statusDiv.textContent = "No terrain-rgb tiles successfully fetched. Cannot create terrain.";
         return null;
     }
-    statusDiv.textContent = `Fetched ${fetchedTileData.length} of ${tilesToFetch.length} terrain tiles. Creating mesh...`;
+    if (fetchedMapImageTileData.length === 0) {
+        statusDiv.textContent = "No map image tiles successfully fetched. Using elevation data for texture, but it might look odd.";
+        // Fallback or alternative texture could be used here if desired
+    }
+    statusDiv.textContent = `Fetched ${fetchedTerrainRGBTileData.length} terrain-rgb tiles and ${fetchedMapImageTileData.length} map image tiles. Creating mesh...`;
 
 
     // 5. Create Terrain Mesh
@@ -259,7 +387,7 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
 
         let elevation = 0;
         let foundTileForVertex = false;
-        for (const data of fetchedTileData) { // data is {tileInfo, img}
+        for (const data of fetchedTerrainRGBTileData) { // data is {tileInfo, img} - USE TERRAIN RGB FOR ELEVATION
             const tileBbox = tileToBoundingBox(data.tileInfo.x, data.tileInfo.y, data.tileInfo.z);
 
             if (lat <= tileBbox.north && lat >= tileBbox.south && lon >= tileBbox.west && lon <= tileBbox.east) {
@@ -281,8 +409,8 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
     if (terrainMesh) scene.remove(terrainMesh);
     const material = new THREE.MeshPhongMaterial({
         map: createTerrainTexture(
-            fetchedTileData.map(d => d.img),      // Array of ImageBitmaps
-            fetchedTileData.map(d => d.tileInfo), // Corresponding array of {x,y,z} tile objects
+            fetchedMapImageTileData.map(d => d.img),      // Array of ImageBitmaps from map images
+            fetchedMapImageTileData.map(d => d.tileInfo), // Corresponding array of {x,y,z} tile objects
             minActualTileX,                       // Min X tile index of the fetched grid
             minActualTileY                        // Min Y tile index of the fetched grid
         ),
@@ -303,7 +431,7 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
 
         let elevation = 0;
         let foundTileForTrackPt = false;
-        for (const data of fetchedTileData) { // data is {tileInfo, img}
+        for (const data of fetchedTerrainRGBTileData) { // data is {tileInfo, img} - USE TERRAIN RGB FOR ELEVATION
             const tileBbox = tileToBoundingBox(data.tileInfo.x, data.tileInfo.y, data.tileInfo.z);
             if (pt.lat <= tileBbox.north && pt.lat >= tileBbox.south && pt.lon >= tileBbox.west && pt.lon <= tileBbox.east) {
                 const u_tile = (pt.lon - tileBbox.west) / (tileBbox.east - tileBbox.west);
@@ -335,6 +463,10 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
     trackLine = new THREE.Line(trackGeometry, trackMaterial);
     scene.add(trackLine);
 
+    // Add City Markers
+    console.log("Calling addCityMarkers with cities:", cities, "and terrainGeoBounds:", terrainGeoBounds);
+    addCityMarkers(cities, terrainGeoBounds, zScale, fetchedTerrainRGBTileData);
+
     statusDiv.textContent = "Terrain and track visualized!";
 
     if (trackPoints3D.length > 0) {
@@ -361,6 +493,66 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
     return { terrainMesh, trackLine };
 }
 
+function addCityMarkers(cityData, terrainGeoBounds, zScale, fetchedTerrainRGBTileData) {
+    // Clear existing city markers
+    cityMarkers.forEach(markerSet => {
+        if (markerSet.mesh) scene.remove(markerSet.mesh);
+        if (markerSet.label) scene.remove(markerSet.label);
+    });
+    cityMarkers = [];
+    console.log("addCityMarkers: Cleared old markers. Processing cities:", cityData);
+    console.log("addCityMarkers: Terrain Geo Bounds:", JSON.parse(JSON.stringify(terrainGeoBounds)));
+    console.log("addCityMarkers: Z-Scale:", zScale);
+
+    const markerHeight = 10 * zScale; // Make marker height relative to zScale
+    const markerRadius = 2 * zScale;
+
+    cityData.forEach(city => {
+        console.log(`addCityMarkers: Processing city: ${city.name} (Lat: ${city.lat}, Lon: ${city.lon})`);
+
+        // Convert city Lat/Lon to normalized coordinates within the terrainGeoBounds
+        const normXCity = (city.lon - terrainGeoBounds.minLon) / (terrainGeoBounds.maxLon - terrainGeoBounds.minLon);
+        const normZCity = (terrainGeoBounds.maxLat - city.lat) / (terrainGeoBounds.maxLat - terrainGeoBounds.minLat);
+        console.log(`addCityMarkers: City ${city.name} - Normalized Coords: X=${normXCity.toFixed(3)}, Z=${normZCity.toFixed(3)}`);
+
+        // Check if the city is within the current terrain bounds
+        if (normXCity < 0 || normXCity > 1 || normZCity < 0 || normZCity > 1) {
+            console.log(`addCityMarkers: City ${city.name} is OUTSIDE the current terrain bounds. Skipping.`);
+            return; // Skip this city
+        }
+
+        // Convert normalized coords to world 3D coordinates
+        const worldX = (normXCity - 0.5) * TERRAIN_SIZE;
+        const worldZ = (normZCity - 0.5) * TERRAIN_SIZE;
+        console.log(`addCityMarkers: City ${city.name} - World Coords: X=${worldX.toFixed(2)}, Z=${worldZ.toFixed(2)}`);
+
+        // Get elevation for the city
+        // Pass zScale as 1.0 to get raw elevation, then apply the overall zScale for final positioning
+        const cityRawElevation = getElevationAtLatLon(city.lat, city.lon, fetchedTerrainRGBTileData, terrainGeoBounds, 1.0); 
+        const markerBaseY = cityRawElevation * zScale; // Apply zScale here for final position
+        console.log(`addCityMarkers: City ${city.name} - Raw Elevation=${cityRawElevation.toFixed(2)}, Marker Base Y=${markerBaseY.toFixed(2)}`);
+
+        // Create Marker Mesh (e.g., a cone or cylinder)
+        const geometry = new THREE.ConeGeometry(markerRadius, markerHeight, 8);
+        const material = new THREE.MeshBasicMaterial({ color: 0xff00ff }); // Bright pink
+        const markerMesh = new THREE.Mesh(geometry, material);
+        
+        // Position the marker: Tip of the cone pointing up, base on the terrain surface
+        markerMesh.position.set(worldX, markerBaseY + markerHeight / 2, worldZ);
+        markerMesh.rotation.x = 0; // Cones point up Y by default
+
+        scene.add(markerMesh);
+
+        // Create Label Sprite
+        const label = makeTextSprite(city.name, { fontsize: 24, borderColor: {r:0,g:0,b:0,a:1}, backgroundColor: {r:255,g:255,b:255,a:0.8} });
+        label.position.set(worldX, markerBaseY + markerHeight + 15 * zScale, worldZ); // Position label above marker
+        scene.add(label);
+        
+        cityMarkers.push({ mesh: markerMesh, label: label, name: city.name });
+        console.log(`addCityMarkers: Added marker and label for ${city.name} to scene.`);
+    });
+    console.log("addCityMarkers: Finished processing. Final cityMarkers count:", cityMarkers.length, cityMarkers.map(cm => cm.name));
+}
 
 // Modified createTerrainTexture to use minCanvasTileX/Y for proper stitching
 function createTerrainTexture(tileImageBitmaps, // Array of ImageBitmaps
@@ -462,6 +654,12 @@ visualizeButton.addEventListener('click', async () => {
     if (scene) {
         if (terrainMesh) scene.remove(terrainMesh);
         if (trackLine) scene.remove(trackLine);
+        // Clear old city markers
+        cityMarkers.forEach(markerSet => {
+            if (markerSet.mesh) scene.remove(markerSet.mesh);
+            if (markerSet.label) scene.remove(markerSet.label);
+        });
+        cityMarkers = [];
     } else {
         initThreeJS(); // Initialize only if not already done
     }
@@ -492,6 +690,23 @@ window.addEventListener('resize', () => {
         camera.aspect = viewerDiv.clientWidth / viewerDiv.clientHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(viewerDiv.clientWidth, viewerDiv.clientHeight);
+    }
+});
+
+// --- Light Control Event Listeners ---
+ambientLightInput.addEventListener('input', () => {
+    const value = parseFloat(ambientLightInput.value);
+    ambientLightValueSpan.textContent = value.toFixed(2);
+    if (ambientLight) {
+        ambientLight.intensity = value;
+    }
+});
+
+directionalLightInput.addEventListener('input', () => {
+    const value = parseFloat(directionalLightInput.value);
+    directionalLightValueSpan.textContent = value.toFixed(2);
+    if (directionalLight) {
+        directionalLight.intensity = value;
     }
 });
 

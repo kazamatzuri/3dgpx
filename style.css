@@ -32,6 +32,18 @@ body {
     border-radius: 3px;
 }
 
+#controls input[type="range"] {
+    width: 200px;
+    margin-right: 10px;
+}
+
+#controls span {
+    display: inline-block;
+    width: 40px;
+    font-weight: bold;
+    color: #007bff;
+}
+
 #controls button {
     padding: 8px 15px;
     background-color: #007bff;
