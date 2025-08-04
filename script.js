@@ -4,6 +4,10 @@ let ambientLight, directionalLight; // Store light references for dynamic update
 const TERRAIN_SIZE = 1000; // Arbitrary size for our 3D terrain plane
 let cityMarkers = []; // To store references to city marker objects for easy removal
 
+// --- Tile Cache ---
+const terrainTileCache = new Map(); // Cache for terrain-rgb tiles
+const mapImageTileCache = new Map(); // Cache for map image tiles
+
 // --- DOM Elements ---
 const mapboxTokenInput = document.getElementById('mapboxToken');
 const gpxFileInput = document.getElementById('gpxFile');
@@ -13,7 +17,10 @@ const ambientLightInput = document.getElementById('ambientLight');
 const directionalLightInput = document.getElementById('directionalLight');
 const ambientLightValueSpan = document.getElementById('ambientLightValue');
 const directionalLightValueSpan = document.getElementById('directionalLightValue');
+const trackHeightInput = document.getElementById('trackHeight');
+const trackHeightValueSpan = document.getElementById('trackHeightValue');
 const visualizeButton = document.getElementById('visualizeButton');
+const clearCacheButton = document.getElementById('clearCacheButton');
 const statusDiv = document.getElementById('status');
 const viewerDiv = document.getElementById('viewer');
 
@@ -166,13 +173,27 @@ function decodeTerrainRGB(r, g, b) {
 }
 
 async function fetchTerrainTile(tileX, tileY, zoom, token) {
+    const cacheKey = `${zoom}_${tileX}_${tileY}`;
+    
+    // Check cache first
+    if (terrainTileCache.has(cacheKey)) {
+        statusDiv.textContent = `Using cached terrain tile ${tileX},${tileY} (zoom ${zoom})...`;
+        return terrainTileCache.get(cacheKey);
+    }
+    
+    // Not in cache, fetch from Mapbox
     const url = `https://api.mapbox.com/v4/mapbox.terrain-rgb/${zoom}/${tileX}/${tileY}.pngraw?access_token=${token}`;
-    statusDiv.textContent = `Fetching tile ${tileX},${tileY} (zoom ${zoom})...`;
+    statusDiv.textContent = `Downloading terrain tile ${tileX},${tileY} (zoom ${zoom})...`;
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Failed to fetch tile ${tileX},${tileY}: ${response.statusText}`);
         const blob = await response.blob();
-        return createImageBitmap(blob);
+        const imageBitmap = await createImageBitmap(blob);
+        
+        // Store in cache for future use
+        terrainTileCache.set(cacheKey, imageBitmap);
+        
+        return imageBitmap;
     } catch (error) {
         console.error("Error fetching tile:", error);
         statusDiv.textContent = `Error fetching tile: ${error.message}`;
@@ -193,15 +214,29 @@ function getElevationFromImageData(imageData, u, v) { // u,v are 0-1 normalized 
 }
 
 async function fetchMapImageTile(tileX, tileY, zoom, token) {
+    const cacheKey = `${zoom}_${tileX}_${tileY}`;
+    
+    // Check cache first
+    if (mapImageTileCache.has(cacheKey)) {
+        statusDiv.textContent = `Using cached map tile ${tileX},${tileY} (zoom ${zoom})...`;
+        return mapImageTileCache.get(cacheKey);
+    }
+    
+    // Not in cache, fetch from Mapbox
     // Example for Mapbox Streets. Replace with your preferred tile provider if needed.
     const url = `https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/256/${zoom}/${tileX}/${tileY}?access_token=${token}`;
     // const url = `https://a.tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`; // OpenStreetMap Example (no token needed)
-    statusDiv.textContent = `Fetching map image tile ${tileX},${tileY} (zoom ${zoom})...`;
+    statusDiv.textContent = `Downloading map tile ${tileX},${tileY} (zoom ${zoom})...`;
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Failed to fetch map image tile ${tileX},${tileY}: ${response.statusText}`);
         const blob = await response.blob();
-        return createImageBitmap(blob);
+        const imageBitmap = await createImageBitmap(blob);
+        
+        // Store in cache for future use
+        mapImageTileCache.set(cacheKey, imageBitmap);
+        
+        return imageBitmap;
     } catch (error) {
         console.error("Error fetching map image tile:", error);
         statusDiv.textContent = `Error fetching map image tile: ${error.message}`;
@@ -362,7 +397,11 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
         statusDiv.textContent = "No map image tiles successfully fetched. Using elevation data for texture, but it might look odd.";
         // Fallback or alternative texture could be used here if desired
     }
-    statusDiv.textContent = `Fetched ${fetchedTerrainRGBTileData.length} terrain-rgb tiles and ${fetchedMapImageTileData.length} map image tiles. Creating mesh...`;
+    
+    // Show cache statistics
+    const terrainCacheCount = terrainTileCache.size;
+    const mapCacheCount = mapImageTileCache.size;
+    statusDiv.textContent = `Processed ${fetchedTerrainRGBTileData.length} terrain tiles and ${fetchedMapImageTileData.length} map tiles. Cache: ${terrainCacheCount} terrain + ${mapCacheCount} map tiles. Creating mesh...`;
 
 
     // 5. Create Terrain Mesh
@@ -450,7 +489,7 @@ async function createTerrain(gpxPoints, mapboxToken, terrainZoom, zScale) {
         // }
 
 
-        trackPoints3D.push(new THREE.Vector3(worldX, elevation * zScale + 2 * zScale, worldZ));
+        trackPoints3D.push(new THREE.Vector3(worldX, elevation * zScale + parseFloat(trackHeightInput.value) * zScale, worldZ));
     }
 
     if (trackLine) scene.remove(trackLine);
@@ -708,6 +747,29 @@ directionalLightInput.addEventListener('input', () => {
     if (directionalLight) {
         directionalLight.intensity = value;
     }
+});
+
+trackHeightInput.addEventListener('input', () => {
+    const value = parseFloat(trackHeightInput.value);
+    trackHeightValueSpan.textContent = value;
+});
+
+// --- Cache Management ---
+clearCacheButton.addEventListener('click', () => {
+    const terrainCount = terrainTileCache.size;
+    const mapCount = mapImageTileCache.size;
+    
+    terrainTileCache.clear();
+    mapImageTileCache.clear();
+    
+    statusDiv.textContent = `Cache cleared! Removed ${terrainCount} terrain tiles and ${mapCount} map tiles.`;
+    
+    // Clear the message after a few seconds
+    setTimeout(() => {
+        if (statusDiv.textContent.includes('Cache cleared!')) {
+            statusDiv.textContent = "Ready. Enter token, select GPX, and click Visualize.";
+        }
+    }, 3000);
 });
 
 // --- Initial call if needed or auto-load something ---
